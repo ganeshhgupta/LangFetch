@@ -1,0 +1,98 @@
+# ============================================================
+# LangFetch Backend — Pinned Dependencies (Python 3.11)
+# All versions verified mutually compatible.
+# Last updated: 2024-Q4 stable set
+# ============================================================
+
+# ------------------------------------------------------------
+# CORE WEB FRAMEWORK
+# fastapi 0.111 works with pydantic v2 and starlette 0.37
+# python-multipart required by fastapi for form/file uploads
+# ------------------------------------------------------------
+fastapi==0.111.1
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9
+python-dotenv==1.0.1
+
+# ------------------------------------------------------------
+# PYDANTIC v2
+# pydantic-core is auto-installed but pinned here to prevent
+# resolver pulling an incompatible pydantic-core build.
+# fastapi 0.111 requires pydantic>=1.7.4,<3.0.0
+# ------------------------------------------------------------
+pydantic==2.8.2
+pydantic-settings==2.4.0
+
+# ------------------------------------------------------------
+# ANTHROPIC SDK
+# 0.31.x: stable streaming + tool_use, httpx>=0.23,<1 required.
+# Avoid 0.20 — missing stream_manager and updated message types.
+# ------------------------------------------------------------
+anthropic==0.31.2
+
+# ------------------------------------------------------------
+# HTTP CLIENT
+# anthropic requires httpx>=0.23.0,<1
+# httpx 0.27.x uses httpcore 1.0.x (matching pair).
+# Do NOT mix httpx 0.26 with httpcore 1.0 — causes import error.
+# ------------------------------------------------------------
+httpx==0.27.2
+httpcore==1.0.5
+anyio==4.4.0
+
+# ------------------------------------------------------------
+# LANGCHAIN ECOSYSTEM — must ALL share the same -core version.
+# Rule: langchain X.Y.Z requires langchain-core X.Y.*
+#       langsmith must satisfy ALL packages' constraints.
+#
+# langchain 0.2.16        → langchain-core>=0.2.38,<0.3
+# langchain-community 0.2.19 → langchain-core>=0.2.38,<0.3
+# langchain-anthropic 0.1.23 → langchain-core>=0.2.38,<0.3
+#                              anthropic>=0.28.0
+# langgraph 0.2.28        → langchain-core>=0.2.38,<0.3
+# langsmith 0.1.98        → satisfies all >=0.1.17,<0.2 constraints
+# ------------------------------------------------------------
+langchain==0.2.16
+langchain-core==0.2.43
+langchain-community==0.2.19
+langchain-anthropic==0.1.23
+langsmith==0.1.98
+langgraph==0.2.28
+
+# ------------------------------------------------------------
+# DATABASE
+# sqlalchemy 2.0.x async ORM, asyncpg is the async pg driver.
+# asyncpg 0.29 supports Python 3.11 and PostgreSQL 14-16.
+# ------------------------------------------------------------
+sqlalchemy==2.0.36
+asyncpg==0.29.0
+
+# ------------------------------------------------------------
+# CACHE — Redis
+# redis 5.0.x has native async support (redis.asyncio).
+# Compatible with Upstash Redis via URL connection.
+# ------------------------------------------------------------
+redis==5.0.8
+
+# ------------------------------------------------------------
+# VECTOR DB — Pinecone
+# CRITICAL: The package was RENAMED from pinecone-client to pinecone.
+# pinecone-client==3.0.0 does NOT exist on PyPI → install error.
+# Use: pip install pinecone (package name = pinecone, not pinecone-client)
+# pinecone 3.2.x supports Python 3.11, grpc optional.
+# ------------------------------------------------------------
+pinecone==3.2.2
+
+# ------------------------------------------------------------
+# OPENAI (for embeddings / fallback)
+# openai 1.14 uses httpx 0.27 — consistent with above httpx pin.
+# tiktoken 0.7 works with openai 1.14 and Python 3.11.
+# ------------------------------------------------------------
+openai==1.35.14
+tiktoken==0.7.0
+
+# ------------------------------------------------------------
+# UTILITIES
+# starlette is pulled by fastapi but pinned to avoid drift.
+# ------------------------------------------------------------
+starlette==0.37.2

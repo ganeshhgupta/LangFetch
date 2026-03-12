@@ -1,0 +1,66 @@
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Roboto+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: 32, 33, 36;
+  --background-rgb: 248, 249, 250;
+  --google-blue: #1A73E8;
+  --google-green: #34A853;
+  --google-red: #EA4335;
+  --google-yellow: #FBBC04;
+}
+
+.dark {
+  --foreground-rgb: 232, 234, 237;
+  --background-rgb: 18, 18, 18;
+}
+
+body {
+  color: rgb(var(--foreground-rgb));
+  background: rgb(var(--background-rgb));
+  font-family: 'Roboto', 'Google Sans', sans-serif;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #dadce0;
+  border-radius: 3px;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #3c4043;
+}
+
+/* SQL code block — light theme matching mockup */
+.sql-code {
+  background: #ffffff;
+  color: #1f2937;
+  font-family: 'Roboto Mono', 'Courier New', monospace;
+  font-size: 0.8125rem;
+  line-height: 1.7;
+  overflow-x: auto;
+  padding: 1rem 1.25rem;
+  white-space: pre;
+}
+.sql-keyword { color: #4f46e5; }
+.sql-string  { color: #d97706; }
+.sql-comment { color: #9ca3af; }
+
+/* Thinking animation */
+@keyframes thinkingDots {
+  0%, 20% { opacity: 0; }
+  50% { opacity: 1; }
+  80%, 100% { opacity: 0; }
+}
+
+.thinking-dot:nth-child(1) { animation: thinkingDots 1.4s infinite 0s; }
+.thinking-dot:nth-child(2) { animation: thinkingDots 1.4s infinite 0.2s; }
+.thinking-dot:nth-child(3) { animation: thinkingDots 1.4s infinite 0.4s; }
