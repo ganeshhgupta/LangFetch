@@ -1,12 +1,66 @@
 'use client'
 
-import { useState } from 'react'
-import { SCHEMAS, type Schema, type Table } from '@/lib/schemas'
+import { useState, useEffect } from 'react'
+import Link from 'next/link'
+import { SCHEMAS, type Schema, type Table, type QueryLogEntry } from '@/lib/schemas'
+import { getQueryLog } from '@/lib/queryLog'
 
 function fmtCount(n: number) {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
   if (n >= 1000) return (n / 1000).toFixed(0) + 'K'
   return String(n)
+}
+
+function timeAgo(iso: string) {
+  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
+  if (diff < 60) return `${diff}s ago`
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+  return `${Math.floor(diff / 3600)}h ago`
+}
+
+function QueryLog({ entries }: { entries: QueryLogEntry[] }) {
+  const [expanded, setExpanded] = useState<string | null>(null)
+  if (entries.length === 0)
+    return <p className="text-xs text-gray-400 px-6 py-4">No queries logged yet.</p>
+  return (
+    <div className="divide-y divide-gray-50">
+      {entries.map(e => (
+        <div key={e.id} className="px-6 py-3 hover:bg-gray-50 transition-colors cursor-pointer"
+          onClick={() => setExpanded(expanded === e.id ? null : e.id)}>
+          <div className="flex items-center gap-2.5 mb-1">
+            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold ${
+              e.type === 'llm'
+                ? 'bg-purple-50 text-purple-700'
+                : 'bg-blue-50 text-blue-700'
+            }`}>
+              {e.type === 'llm'
+                ? <><svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg>LLM</>
+                : <><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>SQL</>
+              }
+            </span>
+            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${e.status === 'success' ? 'bg-green-500' : 'bg-red-500'}`}/>
+            <span className="text-xs font-mono text-gray-700 truncate flex-1">
+              {e.prompt ?? e.sql.split('\n')[0].slice(0, 70)}
+            </span>
+            <span className="text-xs text-gray-400 flex-shrink-0">{e.duration_ms}ms</span>
+            <span className="text-xs text-gray-400 flex-shrink-0">{timeAgo(e.timestamp)}</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+              className={`text-gray-400 transition-transform flex-shrink-0 ${expanded === e.id ? 'rotate-180' : ''}`}>
+              <path d="M6 9l6 6 6-6"/>
+            </svg>
+          </div>
+          {e.prompt && (
+            <p className="text-xs text-gray-500 pl-14 truncate">{e.sql.split('\n')[0].slice(0, 80)}</p>
+          )}
+          {expanded === e.id && (
+            <pre className="mt-2 ml-14 text-xs font-mono bg-gray-950 text-green-300 rounded-lg p-3 overflow-x-auto whitespace-pre-wrap">
+              {e.sql}
+            </pre>
+          )}
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function SchemaDropdown({ selected, onChange }: { selected: Schema; onChange: (s: Schema) => void }) {
@@ -41,8 +95,209 @@ function SchemaDropdown({ selected, onChange }: { selected: Schema; onChange: (s
               )}
             </button>
           ))}
+          {/* New Schema button */}
+          <Link href="/dashboard/schema/new"
+            onClick={() => setOpen(false)}
+            className="w-full flex items-center gap-2 px-4 py-2.5 text-left border-t border-gray-100 hover:bg-gray-50 transition-colors">
+            <span className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#E8F0FE' }}>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#1A73E8" strokeWidth="2.5">
+                <path d="M12 5v14M5 12h14"/>
+              </svg>
+            </span>
+            <span className="text-sm font-medium" style={{ color: '#1A73E8' }}>New Schema...</span>
+          </Link>
         </div>
       )}
+    </div>
+  )
+}
+
+const TABLE_W = 200
+const HEADER_H = 36
+const ROW_H = 26
+const GAP_X = 100
+const GAP_Y = 50
+const MARGIN = 40
+
+function computeERDLayout(tables: Table[]): Record<string, { x: number; y: number }> {
+  const COLS = 2
+  const positions: Record<string, { x: number; y: number }> = {}
+  for (let i = 0; i < tables.length; i++) {
+    const col = i % COLS
+    const row = Math.floor(i / COLS)
+    let y = MARGIN
+    for (let r = 0; r < row; r++) {
+      const rowTables = tables.slice(r * COLS, (r + 1) * COLS)
+      const maxH = Math.max(...rowTables.map(t => HEADER_H + t.columns.length * ROW_H))
+      y += maxH + GAP_Y
+    }
+    positions[tables[i].name] = { x: MARGIN + col * (TABLE_W + GAP_X), y }
+  }
+  return positions
+}
+
+function inferFKRels(schema: Schema): Array<{ fromTable: string; fromColIdx: number; toTable: string }> {
+  const rels: Array<{ fromTable: string; fromColIdx: number; toTable: string }> = []
+  const tableNames = schema.tables.map(t => t.name)
+  for (const table of schema.tables) {
+    table.columns.forEach((col, colIdx) => {
+      if (!col.isFK) return
+      const prefix = col.name.replace(/_id$/, '')
+      const target = tableNames.find(
+        n => n === prefix || n === prefix + 's' || n === prefix + 'es' || n.startsWith(prefix)
+      )
+      if (target && target !== table.name) {
+        rels.push({ fromTable: table.name, fromColIdx: colIdx, toTable: target })
+      }
+    })
+  }
+  return rels
+}
+
+function ERDDiagram({ schema }: { schema: Schema }) {
+  const positions = computeERDLayout(schema.tables)
+  const fkRels = inferFKRels(schema)
+  const COLS = 2
+
+  const rows = Math.ceil(schema.tables.length / COLS)
+  let svgH = MARGIN
+  for (let r = 0; r < rows; r++) {
+    const rowTables = schema.tables.slice(r * COLS, (r + 1) * COLS)
+    const maxH = Math.max(...rowTables.map(t => HEADER_H + t.columns.length * ROW_H))
+    svgH += maxH + (r < rows - 1 ? GAP_Y : 0)
+  }
+  svgH += MARGIN
+
+  const svgW = MARGIN * 2 + COLS * TABLE_W + (COLS - 1) * GAP_X + 40
+
+  function arrowPath(fromTable: string, fromColIdx: number, toTable: string): string {
+    const fp = positions[fromTable]
+    const tp = positions[toTable]
+    if (!fp || !tp) return ''
+    const y1 = fp.y + HEADER_H + (fromColIdx + 0.5) * ROW_H
+    const y2 = tp.y + HEADER_H / 2
+    let x1: number, x2: number, cx1: number, cx2: number
+    if (fp.x !== tp.x) {
+      if (fp.x < tp.x) {
+        x1 = fp.x + TABLE_W; x2 = tp.x
+      } else {
+        x1 = fp.x; x2 = tp.x + TABLE_W
+      }
+      cx1 = (x1 + x2) / 2; cx2 = (x1 + x2) / 2
+    } else {
+      // same column — route to outside
+      const outside = fp.x === MARGIN ? fp.x - 50 : fp.x + TABLE_W + 50
+      x1 = fp.x < svgW / 2 ? fp.x : fp.x + TABLE_W
+      x2 = x1
+      return `M${x1},${y1} C${outside},${y1} ${outside},${y2} ${x2},${y2}`
+    }
+    return `M${x1},${y1} C${cx1},${y1} ${cx2},${y2} ${x2},${y2}`
+  }
+
+  return (
+    <div className="overflow-auto bg-gray-50 rounded-xl border border-gray-200">
+      <svg width={svgW} height={svgH} xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="erd-arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L8,3 z" fill="#1A73E8" opacity="0.7" />
+          </marker>
+        </defs>
+
+        {/* FK relation lines */}
+        {fkRels.map((rel, i) => (
+          <path
+            key={i}
+            d={arrowPath(rel.fromTable, rel.fromColIdx, rel.toTable)}
+            fill="none"
+            stroke="#1A73E8"
+            strokeWidth="1.5"
+            strokeDasharray="5 3"
+            markerEnd="url(#erd-arrow)"
+            opacity="0.55"
+          />
+        ))}
+
+        {/* Table boxes */}
+        {schema.tables.map(table => {
+          const pos = positions[table.name]
+          if (!pos) return null
+          const tableH = HEADER_H + table.columns.length * ROW_H
+          return (
+            <g key={table.name} transform={`translate(${pos.x},${pos.y})`}>
+              {/* Drop shadow */}
+              <rect x={3} y={3} width={TABLE_W} height={tableH} rx={8} fill="rgba(0,0,0,0.07)" />
+              {/* Box */}
+              <rect width={TABLE_W} height={tableH} rx={8} fill="white" stroke="#e5e7eb" strokeWidth={1} />
+              {/* Header */}
+              <rect width={TABLE_W} height={HEADER_H} rx={8} fill="#1A73E8" />
+              <rect y={HEADER_H - 8} width={TABLE_W} height={8} fill="#1A73E8" />
+              <text
+                x={TABLE_W / 2} y={HEADER_H / 2 + 5}
+                textAnchor="middle" fill="white" fontSize={12} fontWeight="600"
+                fontFamily="Inter, system-ui, sans-serif"
+              >
+                {table.name}
+              </text>
+              {/* Columns */}
+              {table.columns.map((col, j) => {
+                const rowY = HEADER_H + j * ROW_H
+                const isLast = j === table.columns.length - 1
+                return (
+                  <g key={col.name}>
+                    <rect
+                      y={rowY} width={TABLE_W} height={ROW_H}
+                      fill={j % 2 === 0 ? 'white' : '#f9fafb'}
+                      rx={isLast ? 0 : 0}
+                    />
+                    {isLast && (
+                      <rect y={rowY + ROW_H - 8} width={TABLE_W} height={8} rx={8}
+                        fill={j % 2 === 0 ? 'white' : '#f9fafb'} />
+                    )}
+                    {col.isPK && (
+                      <circle cx={12} cy={rowY + ROW_H / 2} r={5} fill="#FBBC04" />
+                    )}
+                    {col.isFK && !col.isPK && (
+                      <circle cx={12} cy={rowY + ROW_H / 2} r={5} fill="#1A73E8" opacity={0.6} />
+                    )}
+                    <text
+                      x={col.isPK || col.isFK ? 24 : 10}
+                      y={rowY + ROW_H / 2 + 4}
+                      fontSize={11} fill="#374151"
+                      fontFamily="ui-monospace, monospace"
+                    >
+                      {col.name}
+                    </text>
+                    <text
+                      x={TABLE_W - 8} y={rowY + ROW_H / 2 + 4}
+                      textAnchor="end" fontSize={9} fill="#9ca3af"
+                      fontFamily="ui-monospace, monospace"
+                    >
+                      {col.type.split('(')[0]
+                        .replace('TIMESTAMPTZ', 'TSTZ')
+                        .replace('BIGSERIAL', 'BIGSER')
+                        .replace('VARCHAR', 'VAR')
+                        .replace('INTEGER', 'INT')
+                        .replace('BOOLEAN', 'BOOL')
+                        .replace('NUMERIC', 'NUM')
+                        .replace('SMALLINT', 'SINT')
+                      }
+                    </text>
+                  </g>
+                )
+              })}
+            </g>
+          )
+        })}
+
+        {/* Legend */}
+        <g transform={`translate(${svgW - 140}, ${svgH - 54})`}>
+          <rect width={130} height={46} rx={6} fill="white" stroke="#e5e7eb" strokeWidth={1} />
+          <circle cx={16} cy={15} r={5} fill="#FBBC04" />
+          <text x={26} y={19} fontSize={10} fill="#6b7280" fontFamily="sans-serif">Primary Key</text>
+          <circle cx={16} cy={33} r={5} fill="#1A73E8" opacity={0.6} />
+          <text x={26} y={37} fontSize={10} fill="#6b7280" fontFamily="sans-serif">Foreign Key</text>
+        </g>
+      </svg>
     </div>
   )
 }
@@ -52,12 +307,20 @@ export default function SchemaPage() {
   const [search, setSearch] = useState('')
   const [expanded, setExpanded] = useState<string[]>([SCHEMAS[0].tables[0]?.name ?? ''])
   const [selected, setSelected] = useState<Table | null>(SCHEMAS[0].tables[0] ?? null)
+  const [tab, setTab] = useState<'tables' | 'diagram' | 'log'>('tables')
+  const [liveQueryLog, setLiveQueryLog] = useState<QueryLogEntry[]>([])
+
+  useEffect(() => {
+    setLiveQueryLog(getQueryLog(schema.id))
+  }, [schema.id, tab])
 
   const handleSchemaChange = (s: Schema) => {
     setSchema(s)
     setExpanded([s.tables[0]?.name ?? ''])
     setSelected(s.tables[0] ?? null)
     setSearch('')
+    setTab('tables')
+    setLiveQueryLog(getQueryLog(s.id))
   }
 
   const filtered = schema.tables.filter(t =>
@@ -147,8 +410,53 @@ export default function SchemaPage() {
       </div>
 
       {/* Right: Table detail */}
-      <div className="flex-1 overflow-y-auto bg-white">
-        {selected ? (
+      <div className="flex-1 flex flex-col overflow-hidden bg-white">
+        {/* Tab bar */}
+        <div className="flex items-center gap-0 border-b border-gray-200 px-6 pt-0 flex-shrink-0">
+          {(['tables', 'diagram', 'log'] as const).map(t => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors capitalize ${
+                tab === t
+                  ? 'border-blue-600 text-blue-700'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {t === 'log' ? (
+                <span className="flex items-center gap-1.5">
+                  Query Log
+                  {liveQueryLog.length > 0 && (
+                    <span className="px-1.5 py-0.5 text-xs rounded-full font-semibold" style={{ backgroundColor: '#E8F0FE', color: '#1A73E8' }}>
+                      {liveQueryLog.length}
+                    </span>
+                  )}
+                </span>
+              ) : t === 'diagram' ? 'Diagram' : 'Tables'}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+        {tab === 'log' ? (
+          <QueryLog entries={liveQueryLog} />
+        ) : tab === 'diagram' ? (
+          <div className="p-6 overflow-auto flex-1">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-semibold text-gray-900">Entity Relationship Diagram</h2>
+                <p className="text-xs text-gray-400 mt-0.5">{schema.icon} {schema.name} — {schema.tables.length} tables</p>
+              </div>
+              <div className="flex items-center gap-3 text-xs text-gray-400">
+                <span className="flex items-center gap-1.5">
+                  <span className="inline-block w-8 border-t-2 border-dashed border-blue-400 opacity-60" />
+                  FK relationship
+                </span>
+              </div>
+            </div>
+            <ERDDiagram schema={schema} />
+          </div>
+        ) : selected ? (
           <div className="p-6 max-w-4xl">
             {/* Table header */}
             <div className="flex items-center justify-between mb-1">
@@ -267,6 +575,7 @@ export default function SchemaPage() {
             Select a table to view details
           </div>
         )}
+        </div>
       </div>
     </div>
   )

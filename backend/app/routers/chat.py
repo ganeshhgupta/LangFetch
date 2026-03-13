@@ -1,12 +1,18 @@
 import json
 import os
 import asyncio
+import re
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import anthropic
 
 router = APIRouter()
+
+SQL_PASSTHROUGH_RE = re.compile(
+    r'^\s*(SELECT|WITH\s+\w|EXPLAIN|SHOW|DESCRIBE|PRAGMA)\b',
+    re.IGNORECASE
+)
 
 class ChatRequest(BaseModel):
     message: str
@@ -43,6 +49,15 @@ Always use proper SQL best practices: meaningful aliases, appropriate JOINs, WHE
 
 async def stream_chat(message: str, history: list):
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", "demo"))
+
+    # Pass raw SQL directly without AI transformation
+    if SQL_PASSTHROUGH_RE.match(message):
+        yield f"data: {json.dumps({'type': 'thinking', 'text': 'Parsing SQL query...'})}\n\n"
+        await asyncio.sleep(0.25)
+        yield f"data: {json.dumps({'type': 'sql', 'sql': message.strip()})}\n\n"
+        yield f"data: {json.dumps({'type': 'explanation', 'text': 'Executing your SQL directly.'})}\n\n"
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        return
 
     # Agent thinking steps
     thinking_steps = [

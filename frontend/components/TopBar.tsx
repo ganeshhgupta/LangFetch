@@ -27,7 +27,10 @@ export default function TopBar() {
       {/* Right actions */}
       <div className="flex items-center gap-2">
         <button
-          onClick={() => router.push('/dashboard')}
+          onClick={() => {
+            try { sessionStorage.removeItem('langfetch_messages') } catch {}
+            router.push('/dashboard')
+          }}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">

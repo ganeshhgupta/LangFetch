@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { SCHEMAS, type Schema, type SampleQuery } from '@/lib/schemas'
+import { addQueryLogEntry } from '@/lib/queryLog'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'
 
@@ -63,14 +64,99 @@ function highlightSQL(sql: string): React.ReactNode {
   })
 }
 
-function SQLBlock({ sql, explanation, tip }: { sql: string; explanation?: string; tip?: string }) {
+interface QueryResult {
+  columns: string[]
+  rows: (string | number | null)[][]
+  row_count: number
+}
+
+function ResultsTable({ result }: { result: QueryResult }) {
+  if (result.row_count === 0) {
+    return (
+      <div className="px-4 py-3 text-sm text-gray-500 bg-gray-50 rounded-b-xl border-t border-gray-100">
+        Query returned 0 rows.
+      </div>
+    )
+  }
+  return (
+    <div className="overflow-x-auto border-t border-gray-200 bg-white rounded-b-xl">
+      <div className="flex items-center justify-between px-4 py-2 bg-green-50 border-b border-green-100">
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-green-500" />
+          <span className="text-xs font-medium text-green-700">
+            {result.row_count} row{result.row_count !== 1 ? 's' : ''} returned
+          </span>
+        </div>
+      </div>
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="bg-gray-50 border-b border-gray-100">
+            {result.columns.map(col => (
+              <th key={col} className="px-3 py-2 text-left font-semibold text-gray-500 whitespace-nowrap">
+                {col}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {result.rows.map((row, i) => (
+            <tr key={i} className={`border-b border-gray-50 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
+              {row.map((cell, j) => (
+                <td key={j} className="px-3 py-2 text-gray-700 whitespace-nowrap font-mono">
+                  {cell === null ? <span className="text-gray-300 italic">NULL</span> : String(cell)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function SQLBlock({ sql, explanation, tip, schemaId }: {
+  sql: string
+  explanation?: string
+  tip?: string
+  schemaId: string
+}) {
   const [copied, setCopied] = useState(false)
   const [showExplanation, setShowExplanation] = useState(false)
+  const [running, setRunning] = useState(false)
+  const [result, setResult] = useState<QueryResult | null>(null)
+  const [runError, setRunError] = useState<string | null>(null)
 
   const copy = () => {
     navigator.clipboard.writeText(sql)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  const runQuery = async () => {
+    const start = Date.now()
+    setRunning(true)
+    setResult(null)
+    setRunError(null)
+    try {
+      const res = await fetch(`${API_BASE}/execute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql, schema_id: schemaId }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setRunError(data.detail ?? 'Unknown error')
+        addQueryLogEntry(schemaId, { type: 'sql', sql, duration_ms: Date.now() - start, rows: 0, status: 'error' })
+      } else {
+        setResult(data)
+        addQueryLogEntry(schemaId, { type: 'sql', sql, duration_ms: Date.now() - start, rows: data.row_count, status: 'success' })
+      }
+    } catch {
+      setRunError(`Could not reach backend at ${API_BASE}`)
+      addQueryLogEntry(schemaId, { type: 'sql', sql, duration_ms: Date.now() - start, rows: 0, status: 'error' })
+    } finally {
+      setRunning(false)
+    }
   }
 
   return (
@@ -108,11 +194,27 @@ function SQLBlock({ sql, explanation, tip }: { sql: string; explanation?: string
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
           Optimize
         </button>
-        <button className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-white font-medium transition-colors" style={{ backgroundColor: '#1A73E8' }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-          Run Query
+        <button
+          onClick={runQuery}
+          disabled={running}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-white font-medium transition-all disabled:opacity-60"
+          style={{ backgroundColor: '#1A73E8' }}
+        >
+          {running
+            ? <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+            : <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          }
+          {running ? 'Running...' : 'Run Query'}
         </button>
       </div>
+
+      {runError && (
+        <div className="px-4 py-3 bg-red-50 border-t border-red-100 text-xs text-red-700 leading-relaxed">
+          <span className="font-semibold">Error: </span>{runError}
+        </div>
+      )}
+
+      {result && <ResultsTable result={result} />}
     </div>
   )
 }
@@ -243,10 +345,33 @@ export default function Chat({ onQuerySent, selectedSchema, onSchemaChange }: Ch
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // Instantly inject a pre-built demo response (no API call needed)
+  // Restore chat history from sessionStorage on mount
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem('langfetch_messages')
+      if (saved) {
+        const parsed = JSON.parse(saved) as Message[]
+        setMessages(parsed.map(m => ({ ...m, isStreaming: false })))
+      }
+    } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Persist chat history to sessionStorage whenever messages change
+  useEffect(() => {
+    if (messages.length === 0) return
+    try {
+      sessionStorage.setItem(
+        'langfetch_messages',
+        JSON.stringify(messages.map(m => ({ ...m, isStreaming: false })))
+      )
+    } catch {}
+  }, [messages])
+
   const injectDemoResponse = useCallback((query: SampleQuery, prompt: string) => {
     const userMsgId = Date.now().toString()
     const assistantMsgId = (Date.now() + 1).toString()
+    const start = Date.now()
 
     setMessages(prev => [
       ...prev,
@@ -256,7 +381,6 @@ export default function Chat({ onQuerySent, selectedSchema, onSchemaChange }: Ch
     onQuerySent?.(prompt)
     setIsLoading(true)
 
-    // Simulate streaming agent steps, then reveal SQL
     const steps = [
       `Analyzing ${activeSchema.name} schema...`,
       'Identifying relevant tables and join paths...',
@@ -276,8 +400,15 @@ export default function Chat({ onQuerySent, selectedSchema, onSchemaChange }: Ch
         stepIdx++
         setTimeout(tick, 380)
       } else {
-        // All steps done — reveal SQL
         const finalSteps = thinkingSteps.map(s => ({ ...s, done: true }))
+        addQueryLogEntry(activeSchema.id, {
+          type: 'llm',
+          sql: query.sql,
+          prompt,
+          duration_ms: Date.now() - start,
+          rows: 0,
+          status: 'success',
+        })
         setMessages(prev => prev.map(m =>
           m.id === assistantMsgId
             ? { ...m, thinking: finalSteps, sql: query.sql, explanation: query.explanation, tip: query.tip, isStreaming: false }
@@ -294,6 +425,7 @@ export default function Chat({ onQuerySent, selectedSchema, onSchemaChange }: Ch
 
     const userMsgId = Date.now().toString()
     const assistantMsgId = (Date.now() + 1).toString()
+    const start = Date.now()
 
     setMessages(prev => [
       ...prev,
@@ -317,6 +449,7 @@ export default function Chat({ onQuerySent, selectedSchema, onSchemaChange }: Ch
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let steps: ThinkingStep[] = []
+      let capturedSql = ''
 
       while (true) {
         const { done, value } = await reader.read()
@@ -331,9 +464,20 @@ export default function Chat({ onQuerySent, selectedSchema, onSchemaChange }: Ch
               steps = [...steps.map(s => ({ ...s, done: true })), { text: data.text, done: false }]
               setMessages(prev => prev.map(m => m.id === assistantMsgId ? { ...m, thinking: steps } : m))
             } else if (data.type === 'sql') {
+              capturedSql = data.sql
               steps = steps.map(s => ({ ...s, done: true }))
               setMessages(prev => prev.map(m => m.id === assistantMsgId ? { ...m, thinking: steps, sql: data.sql } : m))
             } else if (data.type === 'explanation') {
+              if (capturedSql) {
+                addQueryLogEntry(activeSchema.id, {
+                  type: 'llm',
+                  sql: capturedSql,
+                  prompt: text,
+                  duration_ms: Date.now() - start,
+                  rows: 0,
+                  status: 'success',
+                })
+              }
               setMessages(prev => prev.map(m => m.id === assistantMsgId ? { ...m, explanation: data.text, isStreaming: false } : m))
             } else if (data.type === 'done') {
               setMessages(prev => prev.map(m => m.id === assistantMsgId ? { ...m, isStreaming: false } : m))
@@ -436,7 +580,7 @@ export default function Chat({ onQuerySent, selectedSchema, onSchemaChange }: Ch
                     )}
 
                     {msg.sql && (
-                      <SQLBlock sql={msg.sql} explanation={msg.explanation} tip={msg.tip} />
+                      <SQLBlock sql={msg.sql} explanation={msg.explanation} tip={msg.tip} schemaId={activeSchema.id} />
                     )}
 
                     {msg.sql && !msg.isStreaming && (
