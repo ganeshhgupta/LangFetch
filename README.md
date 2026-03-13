@@ -8,10 +8,10 @@
 
   ## Screenshots
 
-  | Landing Page | Query Chat | Analytics |
-  |---|---|---|
-  | ![Landing](https://github.com/ganeshhgupta/LangFetch/blob/main/sample/Screenshot%20(38).png?raw=true) | ![Chat](https://github.com/ganeshhgupta/LangFetch/blob/main/sample/Screenshot%20(39).png?raw=true) |
-  ![Analytics](https://github.com/ganeshhgupta/LangFetch/blob/main/sample/Screenshot%20(41).png?raw=true) |
+
+  ![Landing](https://github.com/ganeshhgupta/LangFetch/blob/main/sample/Screenshot%20(38).png?raw=true) 
+  ![Chat](https://github.com/ganeshhgupta/LangFetch/blob/main/sample/Screenshot%20(39).png?raw=true)
+  ![Analytics](https://github.com/ganeshhgupta/LangFetch/blob/main/sample/Screenshot%20(41).png?raw=true)
 
   **Claude Desktop via MCP**
 
