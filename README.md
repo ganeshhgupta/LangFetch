@@ -6,6 +6,12 @@
 
   ---
 
+  ## Live Demo
+
+  **[Open App →](https://frontend-one-ashen-58.vercel.app)** · No signup needed. Five schemas ready to query out of the box.
+
+  ---
+
   ## Screenshots
 
 
