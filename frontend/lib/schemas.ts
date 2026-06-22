@@ -1,3 +1,14 @@
+export interface QueryLogEntry {
+  id: string
+  timestamp: string
+  type: 'sql' | 'llm'
+  sql: string
+  prompt?: string
+  duration_ms: number
+  rows: number
+  status: 'success' | 'error'
+}
+
 export interface Column {
   name: string
   type: string
